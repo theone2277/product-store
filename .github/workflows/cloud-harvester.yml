@@ -1,0 +1,75 @@
+name: 16-Shard Cloud Stream Harvester (Public Matrix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: 'Per-runner concurrency'
+        required: false
+        default: '16'
+
+jobs:
+  scrape-shards:
+    name: Shard ${{ matrix.shard }} / 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run Shard Harvester
+        run: |
+          bun ./scripts/scrape-unified-fallback.mjs --shard ${{ matrix.shard }} --total-shards 16 --concurrency ${{ github.event.inputs.concurrency || 16 }}
+
+      - name: Upload Shard Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-shard-${{ matrix.shard }}
+          path: |
+            backend/cache/scraped_streams_shard_${{ matrix.shard }}.json
+            backend/cache/unrecoverable_shard_${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  combine-all-shards:
+    name: Combine All Shards & Build Master Bundle
+    needs: scrape-shards
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Download All Shard Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: backend/cache/artifacts
+
+      - name: Consolidate Shard Files
+        run: |
+          find backend/cache/artifacts -type f -name "*.json" -exec mv -t backend/cache/ {} +
+          bun ./scripts/merge-cloud-shards.mjs
+
+      - name: Upload Consolidated Master Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALL_SHARDS_RECOVERED_MASTER_BUNDLE
+          path: |
+            backend/cache/ALL_SHARDS_RECOVERED_MASTER.json
+            backend/cache/ALL_SHARDS_DEAD_MASTER.json
+          retention-days: 14
