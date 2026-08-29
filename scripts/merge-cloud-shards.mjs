@@ -16,14 +16,14 @@ let recoveredFiles = 0;
 let deadFiles = 0;
 
 for (const file of files) {
-  if (file.startsWith("scraped_streams_shard_") && file.endsWith(".json")) {
+  if ((file.startsWith("scraped_streams_shard_") || file.startsWith("scraped_dubs_shard_")) && file.endsWith(".json")) {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), "utf8"));
       Object.assign(masterRecovered, data);
       recoveredFiles++;
     } catch (_) {}
   }
-  if (file.startsWith("unrecoverable_shard_") && file.endsWith(".json")) {
+  if ((file.startsWith("unrecoverable_shard_") || file.startsWith("unrecoverable_dubs_shard_")) && file.endsWith(".json")) {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, file), "utf8"));
       const arr = Array.isArray(data) ? data : Object.keys(data);
