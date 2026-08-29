@@ -1,0 +1,75 @@
+name: 16-Shard English Dub Cloud Harvester
+
+on:
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: 'Per-runner concurrency'
+        required: false
+        default: '16'
+
+jobs:
+  scrape-dub-shards:
+    name: Dub Shard ${{ matrix.shard }} / 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run Dub Waterfall Harvester
+        run: |
+          bun ./scripts/scrape-dub-waterfall.mjs --shard ${{ matrix.shard }} --total-shards 16 --concurrency ${{ github.event.inputs.concurrency || 16 }}
+
+      - name: Upload Shard Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-dub-shard-${{ matrix.shard }}
+          path: |
+            backend/cache/scraped_dubs_shard_${{ matrix.shard }}.json
+            backend/cache/unrecoverable_dubs_shard_${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  combine-all-dub-shards:
+    name: Combine All Dub Shards & Build Master Bundle
+    needs: scrape-dub-shards
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Download All Shard Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: backend/cache/artifacts
+
+      - name: Consolidate Shard Files
+        run: |
+          find backend/cache/artifacts -type f -name "*.json" -exec mv -t backend/cache/ {} +
+          bun ./scripts/merge-cloud-shards.mjs
+
+      - name: Upload Consolidated Master Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALL_DUBS_RECOVERED_MASTER_BUNDLE
+          path: |
+            backend/cache/ALL_SHARDS_RECOVERED_MASTER.json
+            backend/cache/ALL_SHARDS_DEAD_MASTER.json
+          retention-days: 14
